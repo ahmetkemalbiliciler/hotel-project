@@ -1,125 +1,56 @@
-import { useState, useEffect } from 'react';
-import { hotelService, availabilityService, pricePredictionService } from '../services/api';
-import FormField from '../components/FormField';
+import { useState } from 'react';
 import { useAuth } from 'react-oidc-context';
+import { useLocation, useNavigate } from 'react-router-dom';
+import FormField from '../components/FormField';
+import { availabilityService, pricePredictionService } from '../services/api';
+import { roomTypes, hotelTypes, getCapacityByRoomType } from '../constants';
 
 export default function Availability() {
     const auth = useAuth();
-    const [hotels, setHotels] = useState([]);
-    const [rooms, setRooms] = useState([]);
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [loading, setLoading] = useState(false);
+    const [predicting, setPredicting] = useState(false);
+    const [success, setSuccess] = useState(null);
+    const [error, setError] = useState(null);
+    const [predictedPrice, setPredictedPrice] = useState(null);
 
-    const [selectedHotel, setSelectedHotel] = useState('');
-    const [selectedRoom, setSelectedRoom] = useState('');
+    const initialRoomId = location.state?.roomId || '';
+    const initialRoomType = location.state?.roomType || '';
 
     const [formData, setFormData] = useState({
+        roomId: initialRoomId,
         startDate: '',
         endDate: '',
-        priceMultiplier: 1.0,
-        availableCount: ''
+        availableCount: '1',
+        price: '',
+        roomType: initialRoomType || 'Standard',
+        hotelType: 'City Hotel',
     });
-
-    const [prediction, setPrediction] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [success, setSuccess] = useState(false);
-    const [error, setError] = useState(null);
-
-    useEffect(() => {
-        fetchHotels();
-    }, []);
-
-    useEffect(() => {
-        if (selectedHotel) {
-            fetchRooms(selectedHotel);
-        } else {
-            setRooms([]);
-            setSelectedRoom('');
-        }
-    }, [selectedHotel]);
-
-    // Oda seçilince varsayılan stok sayısını otomatik dolduralım (isteğe bağlı)
-    useEffect(() => {
-        if (selectedRoom) {
-            const room = rooms.find(r => r.id === selectedRoom);
-            if (room) {
-                // Burada mevcut stoğu çekmek için ayrı bir endpoint gerekebilir
-                // Şimdilik varsayılan boş bırakıyoruz veya 5 yapıyoruz test için
-                setFormData(prev => ({ ...prev, availableCount: 5 }));
-            }
-        }
-    }, [selectedRoom, rooms]);
-
-
-    const fetchHotels = async () => {
-        try {
-            const data = await hotelService.getHotels(auth.user?.access_token);
-            setHotels(data);
-        } catch (err) {
-            console.error('Oteller yüklenemedi:', err);
-        }
-    };
-
-    const fetchRooms = async (hotelId) => {
-        try {
-            const data = await hotelService.getHotelRooms(auth.user?.access_token, hotelId);
-            setRooms(data);
-        } catch (err) {
-            console.error('Odalar yüklenemedi:', err);
-        }
-    };
-
-    const handlePredictPrice = async () => {
-        if (!selectedHotel || !selectedRoom || !formData.startDate) {
-            setError('Lütfen fiyat tahmini için otel, oda ve başlangıç tarihi seçin.');
-            return;
-        }
-
-        setLoading(true);
-        setPrediction(null);
-        setError(null);
-
-        try {
-            const hotel = hotels.find(h => h.id === selectedHotel);
-            const room = rooms.find(r => r.id === selectedRoom);
-
-            const result = await pricePredictionService.predict(auth.user?.access_token, {
-                hotelType: hotel.name.toLowerCase().includes('resort') ? 'Resort Hotel' : 'City Hotel',
-                roomType: room.type,
-                month: new Date(formData.startDate).getMonth() + 1 // 1-12
-            });
-
-            setPrediction(result.predicted_price);
-        } catch (err) {
-            setError('Fiyat tahmini alınamadı: ' + err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const applyPrediction = () => {
-        if (prediction) {
-            // Tahmin edilen fiyatı doğrudan kullanamıyoruz çünkü biz multiplier gönderiyoruz.
-            // Ancak kullanıcıya bunu baz alarak bir multiplier önerebiliriz.
-            // Şimdilik sadece bilgilendirme amacı güdüyoruz.
-            alert(`Önerilen Fiyat: €${prediction.toFixed(2)}. Lütfen çarpanı buna göre ayarlayın.`);
-        }
-    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-        setSuccess(false);
+        setSuccess(null);
 
         try {
-            await availabilityService.updateAvailability(auth.user?.access_token, selectedRoom, {
+            await availabilityService.create(auth.user?.access_token, formData.roomId, {
                 startDate: formData.startDate,
                 endDate: formData.endDate,
-                priceMultiplier: parseFloat(formData.priceMultiplier),
-                availableCount: parseInt(formData.availableCount)
+                availableCount: parseInt(formData.availableCount),
+                price: parseFloat(formData.price),
             });
 
-            setSuccess(true);
-            // Formu sıfırlamak yerine koruyabiliriz, kullanıcı art arda işlem yapabilir
+            setSuccess('Müsaitlik başarıyla eklendi!');
+            setFormData(prev => ({
+                ...prev,
+                startDate: '',
+                endDate: '',
+                availableCount: '1',
+                price: '',
+            }));
+            setPredictedPrice(null);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -127,138 +58,211 @@ export default function Availability() {
         }
     };
 
+    const handlePredict = async () => {
+        if (!formData.startDate) {
+            setError('Fiyat tahmini için başlangıç tarihi gerekli');
+            return;
+        }
+
+        setPredicting(true);
+        setError(null);
+
+        try {
+            const capacity = getCapacityByRoomType(formData.roomType);
+
+            const result = await pricePredictionService.predict(auth.user?.access_token, {
+                capacity,
+                date: formData.startDate,
+                hotelType: formData.hotelType,
+            });
+
+            setPredictedPrice(result.predictedPrice);
+            setFormData(prev => ({ ...prev, price: result.predictedPrice.toString() }));
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setPredicting(false);
+        }
+    };
+
+    const handleChange = (field) => (value) => {
+        setFormData(prev => ({ ...prev, [field]: value }));
+    };
+
     return (
-        <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+        <div className="space-y-6">
             <div>
-                <h1 className="text-2xl font-bold text-slate-900">Müsaitlik Yönetimi</h1>
-                <p className="text-slate-500">Belirli tarih aralıkları için oda stoklarını ve fiyatlarını güncelleyin.</p>
+                <h1 className="text-2xl font-bold text-slate-800">Müsaitlik Yönetimi</h1>
+                <p className="text-slate-500">Oda müsaitliği ve fiyat belirleyin</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Ana Form */}
-                <form onSubmit={handleSubmit} className="md:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            label="Otel Seç"
-                            type="select"
-                            value={selectedHotel}
-                            onChange={(e) => setSelectedHotel(e.target.value)}
-                            options={[
-                                { value: '', label: 'Otel Seçiniz' },
-                                ...hotels.map(h => ({ value: h.id, label: h.name }))
-                            ]}
-                            required
-                        />
+            {initialRoomType && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
+                    <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <p className="font-medium text-amber-800">
+                        Oda Tipi: <span className="font-bold">{initialRoomType}</span>
+                    </p>
+                </div>
+            )}
 
-                        <FormField
-                            label="Oda Seç"
-                            type="select"
-                            value={selectedRoom}
-                            onChange={(e) => setSelectedRoom(e.target.value)}
-                            options={[
-                                { value: '', label: 'Oda Seçiniz' },
-                                ...rooms.map(r => ({ value: r.id, label: `${r.type} (Kap: ${r.capacity})` }))
-                            ]}
-                            disabled={!selectedHotel}
-                            required
-                        />
-                    </div>
+            {success && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center gap-3">
+                    <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="font-medium text-emerald-800">{success}</p>
+                </div>
+            )}
 
-                    <div className="grid grid-cols-2 gap-4">
+            {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="font-medium text-red-800">{error}</p>
+                </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-6 border-b border-slate-100 bg-slate-50">
+                    <h3 className="text-lg font-bold text-slate-800">Müsaitlik Bilgileri</h3>
+                    <p className="text-slate-500 text-sm mt-1">Tarih aralığı ve fiyat belirleyin</p>
+                </div>
+
+                <div className="p-6 space-y-6">
+                    <FormField
+                        label="Oda ID"
+                        value={formData.roomId}
+                        onChange={handleChange('roomId')}
+                        placeholder="Oda ID'sini girin"
+                        required
+                    />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <FormField
                             label="Başlangıç Tarihi"
-                            type="date"
                             value={formData.startDate}
-                            onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                            onChange={handleChange('startDate')}
+                            type="date"
                             required
                         />
                         <FormField
                             label="Bitiş Tarihi"
-                            type="date"
                             value={formData.endDate}
-                            onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                            onChange={handleChange('endDate')}
+                            type="date"
                             required
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            label="Fiyat Çarpanı (1.0 = Baz)"
-                            type="number"
-                            step="0.1"
-                            value={formData.priceMultiplier}
-                            onChange={(e) => setFormData({ ...formData, priceMultiplier: e.target.value })}
-                            placeholder="1.0"
-                            required
-                        />
-                        <FormField
-                            label="Müsait Oda Sayısı"
-                            type="number"
-                            value={formData.availableCount}
-                            onChange={(e) => setFormData({ ...formData, availableCount: e.target.value })}
-                            placeholder="5"
-                            required
-                        />
-                    </div>
+                    <FormField
+                        label="Müsait Oda Sayısı"
+                        value={formData.availableCount}
+                        onChange={handleChange('availableCount')}
+                        type="number"
+                        min="1"
+                        required
+                    />
 
-                    {success && (
-                        <div className="p-4 bg-green-50 text-green-700 rounded-xl text-sm font-medium flex items-center gap-2">
-                            <span>✓</span> Müsaitlik başarıyla güncellendi!
-                        </div>
-                    )}
-
-                    {error && (
-                        <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm">
-                            {error}
-                        </div>
-                    )}
-
-                    <div className="flex justify-end pt-4">
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                        >
-                            {loading ? 'İşleniyor...' : 'Müsaitliği Güncelle'}
-                        </button>
-                    </div>
-                </form>
-
-                {/* AI Tahmin Paneli */}
-                <div className="md:col-span-1 space-y-6">
-                    <div className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white p-6 rounded-2xl shadow-lg">
+                    {/* Price Prediction Section */}
+                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl p-6">
                         <div className="flex items-center gap-2 mb-4">
-                            <span className="text-2xl">🤖</span>
-                            <h2 className="font-bold text-lg">AI Fiyat Tahmini</h2>
+                            <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            <h4 className="font-bold text-purple-800">ML Fiyat Önerisi</h4>
                         </div>
-                        <p className="text-indigo-100 text-sm mb-6">
-                            Piyasa verileri ve talep analizine dayalı olarak en uygun fiyat tahminini alın.
-                        </p>
 
-                        {prediction ? (
-                            <div className="bg-white/10 rounded-xl p-4 mb-4 backdrop-blur-sm border border-white/20">
-                                <p className="text-indigo-200 text-xs uppercase font-bold mb-1">Önerilen Fiyat</p>
-                                <p className="text-3xl font-bold">€{prediction.toFixed(0)}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <FormField
+                                label="Oda Tipi"
+                                value={formData.roomType}
+                                onChange={handleChange('roomType')}
+                                type="select"
+                                options={roomTypes.map(rt => ({ value: rt.value, label: rt.label }))}
+                            />
+                            <FormField
+                                label="Otel Tipi"
+                                value={formData.hotelType}
+                                onChange={handleChange('hotelType')}
+                                type="select"
+                                options={hotelTypes.map(ht => ({ value: ht.value, label: ht.label }))}
+                            />
+                            <div className="flex items-end">
                                 <button
-                                    onClick={applyPrediction}
-                                    className="text-xs text-white underline mt-2 hover:text-indigo-200"
+                                    type="button"
+                                    onClick={handlePredict}
+                                    disabled={predicting || !formData.startDate}
+                                    className="w-full px-4 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                                 >
-                                    Çarpanı Kontrol Et
+                                    {predicting && (
+                                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                        </svg>
+                                    )}
+                                    {predicting ? 'Tahmin...' : 'Fiyat Öner'}
                                 </button>
                             </div>
-                        ) : (
-                            <div className="h-24 flex items-center justify-center border-2 border-dashed border-white/20 rounded-xl mb-4">
-                                <p className="text-sm text-indigo-200">Sonuç burada görünecek</p>
+                        </div>
+
+                        {predictedPrice && (
+                            <div className="bg-white rounded-lg p-4 text-center">
+                                <p className="text-sm text-purple-600 font-medium mb-1">Önerilen Fiyat</p>
+                                <p className="text-3xl font-black text-purple-700">€{predictedPrice}</p>
+                                <p className="text-xs text-slate-500 mt-1">ML modeli tarafından hesaplandı</p>
                             </div>
                         )}
+                    </div>
 
-                        <button
-                            onClick={handlePredictPrice}
-                            disabled={loading || !selectedRoom || !formData.startDate}
-                            className="w-full py-3 bg-white text-indigo-600 font-bold rounded-xl hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                        >
-                            {loading ? 'Analiz Ediliyor...' : 'Tahmin Al'}
-                        </button>
+                    <FormField
+                        label="Gecelik Fiyat (€)"
+                        value={formData.price}
+                        onChange={handleChange('price')}
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        placeholder="Fiyat girin veya yukarıdan öneri alın"
+                        required
+                    />
+                </div>
+
+                <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/rooms')}
+                        className="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-colors"
+                    >
+                        ← Önce Oda Ekle
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={loading || !formData.roomId || !formData.startDate || !formData.endDate || !formData.price}
+                        className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                    >
+                        {loading && (
+                            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                        )}
+                        {loading ? 'Kaydediliyor...' : 'Müsaitlik Ekle'}
+                    </button>
+                </div>
+            </form>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                    <svg className="w-6 h-6 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                        <p className="font-medium text-blue-800">ML Model Hakkında</p>
+                        <p className="text-sm text-blue-700 mt-1">
+                            Fiyat tahminleri; ay, kapasite ve otel tipi (City/Resort) özelliklerini kullanarak hesaplanır.
+                        </p>
                     </div>
                 </div>
             </div>

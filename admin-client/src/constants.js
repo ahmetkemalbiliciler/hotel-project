@@ -1,14 +1,25 @@
-export const ROOM_TYPES = [
-    { id: 'Standard', label: 'Standart Oda', capacity: 2 },
-    { id: 'Double', label: 'Çift Kişilik', capacity: 2 },
-    { id: 'Triple', label: 'Üç Kişilik', capacity: 3 },
-    { id: 'Suite', label: 'Süit', capacity: 4 },
+// Oda tipleri
+export const roomTypes = [
+    { value: 'Standard', label: 'Standard', capacity: 2 },
+    { value: 'Double', label: 'Double', capacity: 2 },
+    { value: 'Triple', label: 'Triple', capacity: 3 },
 ];
 
-export const CITIES = [
-    'İstanbul',
-    'Ankara',
-    'İzmir',
-    'Antalya',
-    'Bursa'
+// Otel tipleri
+export const hotelTypes = [
+    { value: 'City Hotel', label: 'City Hotel' },
+    { value: 'Resort Hotel', label: 'Resort Hotel' },
 ];
+
+// Şehirler
+export const cities = [
+    'Paris', 'London', 'Rome', 'Berlin', 'Madrid',
+    'Amsterdam', 'Vienna', 'Prague', 'Barcelona', 'Budapest',
+    'İstanbul', 'Ankara', 'İzmir', 'Antalya', 'Bursa'
+];
+
+// Oda tipine göre kapasite al
+export const getCapacityByRoomType = (roomType) => {
+    const type = roomTypes.find(rt => rt.value === roomType);
+    return type?.capacity || 2;
+};
