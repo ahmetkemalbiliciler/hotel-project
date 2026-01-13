@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8080/api/v1';
+const API_BASE_URL = 'https://tvhn5liy45.execute-api.eu-north-1.amazonaws.com/prod/api/v1';
 
 const getAuthHeaders = (token) => {
     const headers = { 'Content-Type': 'application/json' };
