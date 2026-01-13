@@ -1,14 +1,26 @@
 import { pool } from "../db/index.js";
+import { sendBookingNotification } from "./queue.service.js";
+import NodeCache from "node-cache";
+
+const searchCache = new NodeCache({ stdTTL: 600 });
 
 export async function searchHotels(
   city,
   startDate,
   endDate,
   guests,
-  hasDiscount = false
+  hasDiscount = false,
+  limit = 10,
+  offset = 0
 ) {
-  // Login kontrolü (opsiyonel)
-  const discount = hasDiscount ? 0.1 : 0; // %10
+  const cacheKey = `${city}_${startDate}_${endDate}_${guests}_${hasDiscount}_${limit}_${offset}`;
+  const cachedData = searchCache.get(cacheKey);
+
+  if (cachedData) {
+    return cachedData;
+  }
+
+  const discount = hasDiscount ? 0.1 : 0;
 
   const { rows } = await pool.query(
     `
@@ -31,11 +43,12 @@ export async function searchHotels(
        AND a.end_date   >= $3
        AND r.capacity   >= $4
        AND a.available_count > 0
+     ORDER BY a.price ASC
+     LIMIT $5 OFFSET $6
      `,
-    [city, startDate, endDate, guests]
+    [city, startDate, endDate, guests, limit, offset]
   );
 
-  // Fiyat indirimi uygula
   const results = rows.map((row) => {
     const finalPrice = discount
       ? Number(row.price) * (1 - discount)
@@ -58,24 +71,29 @@ export async function searchHotels(
       availableCount: row.available_count,
     };
   });
+
+  searchCache.set(cacheKey, results);
   return results;
 }
 
 export async function createBooking({
   roomId,
-  userId, // Cognito sub
+  userId,
   startDate,
   endDate,
+  userEmail,
+  hotelName,
+  roomType,
+  pricePerNight,
 }) {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    // 1) Uygun availability var mı? (kilitle)
     const availabilityRes = await client.query(
       `
-      SELECT id, available_count
+      SELECT id, available_count, price
       FROM availability
       WHERE room_id = $1
         AND start_date <= $2
@@ -92,7 +110,6 @@ export async function createBooking({
 
     const availability = availabilityRes.rows[0];
 
-    // 2) Capacity düş
     await client.query(
       `
       UPDATE availability
@@ -102,7 +119,6 @@ export async function createBooking({
       [availability.id]
     );
 
-    // 3) Reservation oluştur
     const reservationRes = await client.query(
       `
       INSERT INTO reservations (room_id, user_id, start_date, end_date)
@@ -114,7 +130,36 @@ export async function createBooking({
 
     await client.query("COMMIT");
 
-    return reservationRes.rows[0];
+    const booking = reservationRes.rows[0];
+
+    // Gece sayısı hesapla
+    const nights = Math.ceil(
+      (new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)
+    );
+    const totalPrice = (pricePerNight || availability.price) * nights;
+
+    // Notification Service'e detaylı bilgi gönder
+    try {
+      await sendBookingNotification({
+        type: "NEW_RESERVATION",
+        bookingId: booking.id,
+        roomId,
+        userId,
+        userEmail: userEmail || "Bilinmiyor",
+        hotelName: hotelName || "Bilinmiyor",
+        roomType: roomType || "Bilinmiyor",
+        startDate,
+        endDate,
+        nights,
+        pricePerNight: pricePerNight || Number(availability.price),
+        totalPrice,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (notificationError) {
+      console.error("Failed to queue booking notification:", notificationError);
+    }
+
+    return booking;
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

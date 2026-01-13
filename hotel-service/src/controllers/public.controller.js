@@ -2,7 +2,7 @@ import { searchHotels as searchHotelsService } from "../services/public.service.
 import { createBooking as createBookingService } from "../services/public.service.js";
 
 export async function searchHotels(req, res) {
-  const { city, startDate, endDate, guests } = req.query;
+  const { city, startDate, endDate, guests, limit, offset } = req.query;
 
   if (!city || !startDate || !endDate || !guests) {
     return res.status(400).json({
@@ -20,15 +20,18 @@ export async function searchHotels(req, res) {
     startDate,
     endDate,
     guests,
-    hasDiscount
+    hasDiscount,
+    parseInt(limit) || 10,
+    parseInt(offset) || 0
   );
 
   res.json(hotels);
 }
 
 export async function createBooking(req, res) {
-  const { roomId, startDate, endDate } = req.body;
-  const userId = req.user.sub; // Cognito sub
+  const { roomId, startDate, endDate, hotelName, roomType, pricePerNight } = req.body;
+  const userId = req.user.sub;
+  const userEmail = req.user.email || req.user["cognito:username"];
 
   if (!roomId || !startDate || !endDate) {
     return res.status(400).json({ message: "Missing fields" });
@@ -44,6 +47,10 @@ export async function createBooking(req, res) {
       userId,
       startDate,
       endDate,
+      userEmail,
+      hotelName,
+      roomType,
+      pricePerNight,
     });
 
     res.status(201).json(reservation);

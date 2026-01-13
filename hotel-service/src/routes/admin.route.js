@@ -5,10 +5,12 @@ import {
   createHotel,
   addRoom,
   addAvailability,
+  getPredictedPrice,
 } from "../controllers/admin.controller.js";
 
 const router = express.Router();
 
+router.get("/predict-price", requireAuth, requireAdmin, getPredictedPrice);
 router.post("/hotels", requireAuth, requireAdmin, createHotel);
 
 router.post("/hotels/:hotelId/rooms", requireAuth, requireAdmin, addRoom);

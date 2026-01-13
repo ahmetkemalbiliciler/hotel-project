@@ -4,6 +4,7 @@ import {
   addRoom as addRoomService,
   addAvailability as addAvailabilityService,
 } from "../services/admin.service.js";
+import { predictPrice } from "../services/ml.service.js";
 
 export async function createHotel(req, res) {
   const { name, city, latitude, longitude } = req.body;
@@ -50,4 +51,15 @@ export async function addAvailability(req, res) {
     price
   );
   res.status(201).json(availability);
+}
+
+export async function getPredictedPrice(req, res) {
+  const { capacity, date, hotelType } = req.query;
+
+  if (!capacity || !date) {
+    return res.status(400).json({ message: "Capacity and date are required" });
+  }
+
+  const prediction = predictPrice(Number(capacity), date, hotelType);
+  res.json({ predictedPrice: prediction });
 }
