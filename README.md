@@ -29,7 +29,7 @@ Bu sistem, kullanıcıların otel arayıp rezervasyon yapmasını sağlar. Admin
 hotel-project/
 ├── hotel-service/
 │   └── src/
-│       ├── index.js              # Ana Express server, ML model eğitimi
+│       ├── index.js              # Ana Express server
 │       ├── controllers/
 │       │   ├── admin.controller.js    # Hotel/room/availability yönetimi
 │       │   └── public.controller.js   # Arama ve rezervasyon
@@ -78,7 +78,7 @@ ML, Queue, Admin ve Public servisleri ayrı dosyalarda. Bir servis değiştiğin
 ### 1. ML Model Tutarsız Fiyat Tahminleri
 **Problem:** İlk kullandığımız dataset'te model tutarlı fiyatlar öneremiyordu.
 
-**Çözüm:** Daha iyi bir dataset'e geçtik ve veri önişleme adımları ekledik.
+**Çözüm:** Daha iyi bir dataset'e geçtik.
 
 ### 2. Cache Key Collision
 **Problem:** hasDiscount parametresi cache key'e dahil değildi, giriş yapmış ve yapmamış kullanıcılar aynı fiyatları görüyordu.
